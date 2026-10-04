@@ -173,10 +173,8 @@ func newJoinDialOption(opts ...DialOption) DialOption {
 // If this option is set to true every connection will release the buffer after
 // flushing the data on the wire.
 //
-// # Experimental
-//
-// Notice: This API is EXPERIMENTAL and may be changed or removed in a
-// later release.
+// Deprecated: shared write buffer is enabled by default. WithSharedWriteBuffer
+// will be removed in a future release.
 func WithSharedWriteBuffer(val bool) DialOption {
 	return newFuncDialOption(func(o *dialOptions) {
 		o.copts.SharedWriteBuffer = val
@@ -209,8 +207,19 @@ func WithReadBufferSize(s int) DialOption {
 
 // WithInitialWindowSize returns a DialOption which sets the value for initial
 // window size on a stream. The lower bound for window size is 64K and any value
-// smaller than that will be ignored.
+// smaller than that will be ignored. This does not disable dynamic flow control.
+//
+// Deprecated: use WithInitialStreamWindowSize instead. Will be supported
+// throughout 1.x.
 func WithInitialWindowSize(s int32) DialOption {
+	return WithInitialStreamWindowSize(s)
+}
+
+// WithInitialStreamWindowSize returns a DialOption that sets the value for
+// initial window size on a stream. The lower bound for window size is 64K and
+// any value smaller than that will be ignored. This does not disable dynamic
+// flow control.
+func WithInitialStreamWindowSize(s int32) DialOption {
 	return newFuncDialOption(func(o *dialOptions) {
 		o.copts.InitialWindowSize = s
 	})
@@ -218,10 +227,46 @@ func WithInitialWindowSize(s int32) DialOption {
 
 // WithInitialConnWindowSize returns a DialOption which sets the value for
 // initial window size on a connection. The lower bound for window size is 64K
-// and any value smaller than that will be ignored.
+// and any value smaller than that will be ignored. This does not disable
+// dynamic flow control.
 func WithInitialConnWindowSize(s int32) DialOption {
 	return newFuncDialOption(func(o *dialOptions) {
 		o.copts.InitialConnWindowSize = s
+	})
+}
+
+// WithStaticStreamWindowSize returns a DialOption which sets the initial
+// stream window size to the value provided and disables dynamic flow control.
+//
+// Note that this also disables dynamic flow control for the connection,
+// falling back to a default static connection-level window of 64KB. To
+// use a larger connection-level window, you must also use the
+// [WithStaticConnWindowSize] DialOption.
+//
+// Most users should not configure static flow control windows unless
+// operating in a memory-constrained environment.
+func WithStaticStreamWindowSize(s int32) DialOption {
+	return newFuncDialOption(func(o *dialOptions) {
+		o.copts.InitialWindowSize = s
+		o.copts.StaticWindowSize = true
+	})
+}
+
+// WithStaticConnWindowSize returns a DialOption which sets the initial
+// connection window size to the value provided and disables dynamic flow
+// control.
+//
+// Note that this also disables dynamic flow control for individual streams,
+// falling back to a default static connection-level window of 64KB. To
+// explicitly configure the stream-level window size, you must also use the
+// [WithStaticStreamWindowSize] DialOption.
+//
+// Most users should not configure static flow control windows unless
+// operating in a memory-constrained environment.
+func WithStaticConnWindowSize(s int32) DialOption {
+	return newFuncDialOption(func(o *dialOptions) {
+		o.copts.InitialConnWindowSize = s
+		o.copts.StaticWindowSize = true
 	})
 }
 
@@ -360,7 +405,7 @@ func WithReturnConnectionError() DialOption {
 //
 // Note that using this DialOption with per-RPC credentials (through
 // WithCredentialsBundle or WithPerRPCCredentials) which require transport
-// security is incompatible and will cause grpc.Dial() to fail.
+// security is incompatible and will cause RPCs to fail.
 //
 // Deprecated: use WithTransportCredentials and insecure.NewCredentials()
 // instead. Will be supported throughout 1.x.
@@ -587,6 +632,8 @@ func WithChainStreamInterceptor(interceptors ...StreamClientInterceptor) DialOpt
 
 // WithAuthority returns a DialOption that specifies the value to be used as the
 // :authority pseudo-header and as the server name in authentication handshake.
+// This overrides all other ways of setting authority on the channel, but can be
+// overridden per-call by using grpc.CallAuthority.
 func WithAuthority(a string) DialOption {
 	return newFuncDialOption(func(o *dialOptions) {
 		o.authority = a
@@ -682,10 +729,11 @@ func WithDisableHealthCheck() DialOption {
 func defaultDialOptions() dialOptions {
 	return dialOptions{
 		copts: transport.ConnectOptions{
-			ReadBufferSize:  defaultReadBufSize,
-			WriteBufferSize: defaultWriteBufSize,
-			UserAgent:       grpcUA,
-			BufferPool:      mem.DefaultBufferPool(),
+			ReadBufferSize:    defaultReadBufSize,
+			WriteBufferSize:   defaultWriteBufSize,
+			SharedWriteBuffer: true,
+			UserAgent:         grpcUA,
+			BufferPool:        mem.DefaultBufferPool(),
 		},
 		bs:                       internalbackoff.DefaultExponential,
 		idleTimeout:              30 * time.Minute,
